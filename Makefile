@@ -6,7 +6,7 @@ SDL_LIBS := $(shell sdl2-config --libs 2>/dev/null || pkg-config --libs sdl2)
 BINARY ?= build/nightfall
 .PHONY: all test clean
 all: $(BINARY)
-$(BINARY): src/main.cpp src/game.hpp src/network.hpp src/render.hpp src/fonts.hpp src/font_data.hpp VERSION
+$(BINARY): src/main.cpp src/game.hpp src/network.hpp src/render.hpp src/fonts.hpp src/font_data.hpp src/sprites.hpp src/sprite_data.hpp VERSION
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -DNIGHTFALL_VERSION='"$(VERSION)"' $(SDL_CFLAGS) src/main.cpp -o $@ $(SDL_LIBS)
 test: all

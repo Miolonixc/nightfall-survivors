@@ -416,11 +416,14 @@ int main(int argc, char **argv) {
     }
     uint32_t renderFlags =
         headless ? uint32_t(SDL_RENDERER_SOFTWARE) : uint32_t(SDL_RENDERER_ACCELERATED);
-    if (!headless && !fast)
+    bool usesVsync = !headless && !fast;
+    if (usesVsync)
         renderFlags |= SDL_RENDERER_PRESENTVSYNC;
     SDL_Renderer *r = SDL_CreateRenderer(window, -1, renderFlags);
-    if (!r)
+    if (!r) {
+        usesVsync = false;
         r = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
     if (!r) {
         std::cerr << SDL_GetError() << "\n";
         SDL_DestroyWindow(window);
@@ -434,7 +437,8 @@ int main(int argc, char **argv) {
     SDL_GetRendererInfo(r, &rendererInfo);
     std::cout << "VIDEO " << SDL_GetCurrentVideoDriver() << " RENDERER "
               << (rendererInfo.name ? rendererInfo.name : "unknown") << " AUDIO "
-              << (SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "none") << std::endl;
+              << (SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "none")
+              << " PACING " << (usesVsync ? "vsync" : fast ? "unlimited" : "timer") << std::endl;
     int result = 0;
     {
         Paint paint{r, {}};
@@ -907,7 +911,10 @@ int main(int argc, char **argv) {
                 readyWritten = bool(stamp);
             }
             frame++;
-            if (!fast && !(rendererInfo.flags & SDL_RENDERER_PRESENTVSYNC)) {
+            // Track the successfully requested mode. Some firmware renderers omit
+            // PRESENTVSYNC from GetRendererInfo despite waiting for every swap.
+            // Sleeping to the same deadline then misses the next display interval.
+            if (!fast && !usesVsync) {
                 auto target = now + std::chrono::microseconds(16667);
                 std::this_thread::sleep_until(target);
             }

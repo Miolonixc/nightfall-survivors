@@ -22,7 +22,10 @@ with tempfile.TemporaryDirectory() as directory:
         processes.append(p)
         return p
     def finish(p, expected=0):
-        out, err = p.communicate(timeout=25)
+        # Four software-rendered SDL clients share a CI runner. Allow scheduling
+        # overhead beyond the host's nominal 22 seconds; protocol assertions below
+        # still require authoritative ticks, snapshots and all four distinct slots.
+        out, err = p.communicate(timeout=90)
         assert p.returncode == expected, (p.returncode, out, err)
     def report(name):
         return json.loads((root / (name + '.json')).read_text())

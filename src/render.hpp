@@ -26,6 +26,11 @@ struct Paint {
         SDL_Rect a{x, y, w, h};
         SDL_RenderFillRect(r, &a);
     }
+    // Two-pixel ink borders preserve silhouettes where sprites overlap at 640x480.
+    void spriteBox(int x, int y, int w, int h, Color c) {
+        box(x - 2, y - 2, w + 4, h + 4, {7, 12, 20});
+        box(x, y, w, h, c);
+    }
     void frame(int x, int y, int w, int h, Color c) {
         color(c);
         SDL_Rect a{x, y, w, h};
@@ -62,11 +67,14 @@ struct Paint {
             box(x - 4, y - 5, 8, 24, White);
             return;
         }
-        if (hurt && int(time * 20) % 2)
-            return;
-        Color c = playerColor(id);
+        // Damage feedback must never make the player disappear inside a crowd.
+        Color c = hurt && int(time * 20) % 2 ? White : playerColor(id);
         int bob = int(std::sin(time * 8 + id) * 2);
-        box(x - 10, y - 9 + bob, 20, 22, c);
+        // Light outer silhouette and dark inner edge separate the hero from enemies.
+        box(x - 7, y - 31 + bob, 14, 15, White);
+        box(x - 14, y - 19 + bob, 28, 7, White);
+        box(x - 15, y - 7 + bob, 30, 24, White);
+        spriteBox(x - 10, y - 9 + bob, 20, 22, c);
         box(x - 13, y + 3 + bob, 6, 12, c);
         box(x + 7, y + 3 + bob, 6, 12, c);
         box(x - 6, y - 18 + bob, 12, 12, {239, 201, 164});
@@ -83,34 +91,53 @@ struct Paint {
         int x = int(s.x), y = int(s.y);
         if (x < -40 || x > 680 || y < -40 || y > 520)
             return;
-        Color c = e.flash > 0
-                      ? White
-                      : (e.type == 3 ? Color{194, 92, 118}
-                                     : (e.type == 2 ? Color{135, 112, 169} : Color{109, 158, 130}));
+        const Color edge{7, 12, 20};
+        const Color body = e.type == 3 ? Color{177, 65, 91}
+                           : e.type == 2 ? Color{115, 91, 155}
+                           : e.type == 1 ? Color{173, 112, 188}
+                                         : Color{106, 155, 93};
+        // A hit lights the face, retaining the body colour/type in mass combat.
+        const Color face = e.flash > 0 ? White
+                           : e.type == 2 ? Color{183, 153, 210}
+                                         : Color{173, 192, 117};
         int bob = int(std::sin(t * 5 + e.id) * 2);
+        y += bob;
         if (e.type == 1) {
-            box(x - 9, y - 6 + bob, 18, 15, {151, 111, 184});
-            for (int i = 0; i < 3; i++) {
-                box(x - 23 + i * 5, y - 11 + i * 3 + bob, 7, 8, c);
-                box(x + 16 - i * 5, y - 11 + i * 3 + bob, 7, 8, c);
+            // Bats: wide scalloped wings, small bright face; never a humanoid block.
+            for (int side : {-1, 1}) {
+                int left = side < 0 ? x - 22 : x + 7;
+                spriteBox(left, y - 9, 15, 7, body);
+                box(side < 0 ? x - 17 : x + 7, y - 2, 10, 5, body);
             }
+            spriteBox(x - 6, y - 8, 12, 16, body);
+            box(x - 5, y - 14, 3, 7, body);
+            box(x + 2, y - 14, 3, 7, body);
+            box(x - 4, y - 6, 3, 3, White);
+            box(x + 2, y - 6, 3, 3, White);
         } else {
-            int k = e.type == 3 ? 2 : 1;
-            circle(x, y + 12 * k, 11 * k, {5, 11, 19, 120});
-            box(x - 10 * k, y - 6 * k + bob, 20 * k, 21 * k, c);
-            box(x - 8 * k, y - 17 * k + bob, 16 * k, 14 * k, c);
-            box(x - 14 * k, y + 2 * k + bob, 5 * k, 9 * k, c);
-            box(x + 9 * k, y + 2 * k + bob, 5 * k, 9 * k, c);
+            const int k = e.type == 3 ? 2 : 1;
+            const int width = e.type == 2 ? 14 : 10;
+            spriteBox(x - width * k, y - 5 * k, width * 2 * k, 19 * k, body);
+            spriteBox(x - 8 * k, y - 18 * k, 16 * k, 13 * k, face);
+            box(x - 6 * k, y - 16 * k, 12 * k, 2 * k, {207, 214, 155});
+            box(x - 5 * k, y - 11 * k, 3 * k, 3 * k, edge);
+            box(x + 3 * k, y - 11 * k, 3 * k, 3 * k, edge);
+            box(x - 3 * k, y - 5 * k, 7 * k, 2 * k, edge);
+            // Separated feet and shoulder accents read through neighbouring bodies.
+            box(x - 7 * k, y + 14 * k, 5 * k, 4 * k, edge);
+            box(x + 3 * k, y + 14 * k, 5 * k, 4 * k, edge);
+            box(x - width * k, y - 3 * k, 4 * k, 5 * k,
+                e.type == 2 ? Color{195, 167, 213} : Color{145, 178, 104});
+            if (e.type == 2) {
+                spriteBox(x - 16, y - 19, 5, 8, {185, 156, 207});
+                spriteBox(x + 11, y - 19, 5, 8, {185, 156, 207});
+            }
             if (e.type == 3) {
-                box(x - 18, y - 39 + bob, 36, 9, Gold);
-                box(x - 18, y - 45 + bob, 6, 9, Gold);
-                box(x - 3, y - 45 + bob, 6, 9, Gold);
-                box(x + 12, y - 45 + bob, 6, 9, Gold);
+                spriteBox(x - 18, y - 40, 36, 8, Gold);
+                for (int dx : {-18, -3, 12})
+                    box(x + dx, y - 47, 6, 9, Gold);
             }
         }
-        box(x - 6, y - 11 + bob, 4, 3, Gold);
-        box(x + 3, y - 11 + bob, 4, 3, Gold);
-        box(x - 4, y + 1 + bob, 8, 3, Ink);
     }
     void world(const World &w, int local) {
         int id = std::clamp(local, 0, 3);
@@ -123,30 +150,55 @@ struct Paint {
                 uint32_t h = (uint32_t(xx) * 73856093u) ^ (uint32_t(yy) * 19349663u);
                 Vec s = screen({xx * 40.f, yy * 40.f});
                 int x = int(s.x), y = int(s.y);
-                box(x, y, 39, 39, h % 3 ? Color{22, 36, 42} : Color{25, 40, 43});
+                box(x, y, 40, 40, h % 3 ? Color{20, 31, 37} : Color{22, 34, 39});
                 if (h % 9 == 0) {
-                    box(x + 7, y + 17, 2, 5, {42, 64, 59});
-                    box(x + 12, y + 14, 2, 6, {42, 64, 59});
+                    box(x + 7, y + 17, 2, 5, {31, 46, 43});
+                    box(x + 12, y + 14, 2, 6, {31, 46, 43});
                 }
                 if (h % 31 == 0) {
-                    box(x + 21, y + 13, 11, 15, {47, 60, 67});
-                    box(x + 23, y + 9, 7, 7, {47, 60, 67});
+                    box(x + 21, y + 13, 11, 15, {34, 46, 52});
+                    box(x + 23, y + 9, 7, 7, {34, 46, 52});
                     box(x + 24, y + 14, 5, 2, {25, 36, 46});
                     box(x + 26, y + 12, 1, 7, {25, 36, 46});
                 }
                 if (h % 53 == 0) {
                     circle(x + 17, y + 22, 10, {65, 56, 37, 100});
-                    box(x + 15, y + 17, 4, 10, {203, 170, 95});
-                    box(x + 16, y + 13 + int(w.time * 5) % 2, 2, 4, Gold);
+                    box(x + 15, y + 17, 4, 10, {102, 91, 62});
+                    box(x + 16, y + 13 + int(w.time * 5) % 2, 2, 4, {144, 120, 69});
                 }
             }
         for (auto &g : w.gems) {
             Vec s = screen(g.pos);
-            diamond(int(s.x), int(s.y), 4, g.value > 1 ? Gold : Teal);
+            diamond(int(s.x), int(s.y), 4, Ink);
+            diamond(int(s.x), int(s.y), 3, g.value > 1 ? Gold : Color{62, 145, 132});
             box(int(s.x), int(s.y) - 2, 1, 2, White);
         }
-        for (auto &e : w.enemies)
-            monster(e, w.time);
+        // Stable foot ordering prevents spawn order from cutting faces with distant bodies.
+        std::vector<const Enemy *> depth;
+        depth.reserve(w.enemies.size());
+        for (const auto &e : w.enemies)
+            depth.push_back(&e);
+        std::sort(depth.begin(), depth.end(), [](const Enemy *a, const Enemy *b) {
+            return a->pos.y == b->pos.y ? a->id < b->id : a->pos.y < b->pos.y;
+        });
+        for (const auto *e : depth)
+            monster(*e, w.time);
+        for (auto &s : w.shots) {
+            Vec p = screen(s.pos);
+            Vec trail = p - unit(s.vel) * 10;
+            line(int(trail.x), int(trail.y), int(p.x), int(p.y), playerColor(s.owner));
+            diamond(int(p.x), int(p.y), 5, Ink);
+            diamond(int(p.x), int(p.y), 3, White);
+        }
+        for (auto &s : w.sparks) {
+            Vec p = screen(s.pos);
+            int rad = int((.35f - s.life) * 45);
+            for (int k = 0; k < 6; k++) {
+                float a = k * Pi / 3;
+                box(int(p.x + std::cos(a) * rad), int(p.y + std::sin(a) * rad), 3, 3,
+                    s.kind == 0 ? Red : Gold);
+            }
+        }
         for (int i = 0; i < 4; i++) {
             auto &p = w.players[i];
             if (!p.active)
@@ -165,21 +217,6 @@ struct Paint {
             if (p.hp <= 0) {
                 box(int(s.x) - 20, int(s.y) + 24, 40, 4, Panel);
                 box(int(s.x) - 20, int(s.y) + 24, int(40 * p.revive / 3), 4, Teal);
-            }
-        }
-        for (auto &s : w.shots) {
-            Vec p = screen(s.pos);
-            Vec trail = p - unit(s.vel) * 10;
-            line(int(trail.x), int(trail.y), int(p.x), int(p.y), playerColor(s.owner));
-            diamond(int(p.x), int(p.y), 4, White);
-        }
-        for (auto &s : w.sparks) {
-            Vec p = screen(s.pos);
-            int rad = int((.35f - s.life) * 45);
-            for (int k = 0; k < 6; k++) {
-                float a = k * Pi / 3;
-                box(int(p.x + std::cos(a) * rad), int(p.y + std::sin(a) * rad), 3, 3,
-                    s.kind == 0 ? Red : Gold);
             }
         }
         box(0, 0, 640, 53, Ink);

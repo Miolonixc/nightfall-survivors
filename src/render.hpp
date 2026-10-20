@@ -1,4 +1,5 @@
 #pragma once
+#include "fonts.hpp"
 #include "network.hpp"
 #include <SDL.h>
 #include <iomanip>
@@ -17,6 +18,8 @@ inline Color playerColor(int i) {
 struct Paint {
     SDL_Renderer *r;
     Vec camera;
+    Fonts fonts;
+    Paint(SDL_Renderer *renderer, Vec origin) : r(renderer), camera(origin), fonts(renderer) {}
     void color(Color c) { SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a); }
     void box(int x, int y, int w, int h, Color c) {
         color(c);
@@ -44,48 +47,10 @@ struct Paint {
             box(x - (rad - std::abs(yy)), y + yy, 2 * (rad - std::abs(yy)) + 1, 1, c);
     }
     void text(int x, int y, const std::string &s, Color c = White, int scale = 2) {
-        static const std::map<char, std::array<uint8_t, 7>> font = {
-            {'A', {14, 17, 17, 31, 17, 17, 17}}, {'B', {30, 17, 17, 30, 17, 17, 30}},
-            {'C', {14, 17, 16, 16, 16, 17, 14}}, {'D', {30, 17, 17, 17, 17, 17, 30}},
-            {'E', {31, 16, 16, 30, 16, 16, 31}}, {'F', {31, 16, 16, 30, 16, 16, 16}},
-            {'G', {14, 17, 16, 23, 17, 17, 15}}, {'H', {17, 17, 17, 31, 17, 17, 17}},
-            {'I', {31, 4, 4, 4, 4, 4, 31}},      {'J', {7, 2, 2, 2, 18, 18, 12}},
-            {'K', {17, 18, 20, 24, 20, 18, 17}}, {'L', {16, 16, 16, 16, 16, 16, 31}},
-            {'M', {17, 27, 21, 21, 17, 17, 17}}, {'N', {17, 25, 25, 21, 19, 19, 17}},
-            {'O', {14, 17, 17, 17, 17, 17, 14}}, {'P', {30, 17, 17, 30, 16, 16, 16}},
-            {'Q', {14, 17, 17, 17, 21, 18, 13}}, {'R', {30, 17, 17, 30, 20, 18, 17}},
-            {'S', {15, 16, 16, 14, 1, 1, 30}},   {'T', {31, 4, 4, 4, 4, 4, 4}},
-            {'U', {17, 17, 17, 17, 17, 17, 14}}, {'V', {17, 17, 17, 17, 17, 10, 4}},
-            {'W', {17, 17, 17, 21, 21, 21, 10}}, {'X', {17, 17, 10, 4, 10, 17, 17}},
-            {'Y', {17, 17, 10, 4, 4, 4, 4}},     {'Z', {31, 1, 2, 4, 8, 16, 31}},
-            {'0', {14, 17, 19, 21, 25, 17, 14}}, {'1', {4, 12, 4, 4, 4, 4, 14}},
-            {'2', {14, 17, 1, 2, 4, 8, 31}},     {'3', {30, 1, 1, 14, 1, 1, 30}},
-            {'4', {2, 6, 10, 18, 31, 2, 2}},     {'5', {31, 16, 16, 30, 1, 1, 30}},
-            {'6', {14, 16, 16, 30, 17, 17, 14}}, {'7', {31, 1, 2, 4, 8, 8, 8}},
-            {'8', {14, 17, 17, 14, 17, 17, 14}}, {'9', {14, 17, 17, 15, 1, 1, 14}},
-            {':', {0, 4, 4, 0, 4, 4, 0}},        {'.', {0, 0, 0, 0, 0, 12, 12}},
-            {'-', {0, 0, 0, 31, 0, 0, 0}},       {'/', {1, 2, 2, 4, 8, 8, 16}},
-            {'+', {0, 4, 4, 31, 4, 4, 0}},       {'!', {4, 4, 4, 4, 4, 0, 4}},
-            {'>', {16, 8, 4, 2, 4, 8, 16}},      {'?', {14, 17, 1, 2, 4, 0, 4}},
-            {'(', {2, 4, 8, 8, 8, 4, 2}},        {')', {8, 4, 2, 2, 2, 4, 8}}};
-        int start = x;
-        for (char ch : s) {
-            if (ch == '\n') {
-                y += 9 * scale;
-                x = start;
-                continue;
-            }
-            auto it = font.find(ch);
-            if (it != font.end())
-                for (int row = 0; row < 7; row++)
-                    for (int col = 0; col < 5; col++)
-                        if (it->second[row] & (1 << (4 - col)))
-                            box(x + col * scale, y + row * scale, scale, scale, c);
-            x += 6 * scale;
-        }
+        fonts.draw(x, y, s, {c.r, c.g, c.b, c.a}, scale);
     }
     void center(int y, const std::string &s, Color c = White, int scale = 2) {
-        text((640 - int(s.size()) * 6 * scale) / 2, y, s, c, scale);
+        text((640 - fonts.width(s, scale)) / 2, y, s, c, scale);
     }
     Vec screen(Vec p) { return p - camera + Vec{320, 240}; }
     void person(Vec pos, int id, float time, bool down = false, bool hurt = false) {

@@ -1,0 +1,28 @@
+{
+  "stick_distance": 93.93299999999999,
+  "dpad_distance": 135.0,
+  "stick": {
+    "view": 1,
+    "selection": 0,
+    "x": 893.933,
+    "y": 800,
+    "axes": [
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "dpad": {
+    "view": 1,
+    "selection": 0,
+    "x": 758.933,
+    "y": 800,
+    "axes": [
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+}

@@ -10,6 +10,14 @@ if [ -n "$controlfolder" ]; then
     get_controls
     export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 fi
+# muOS uses a firmware-specific Mali framebuffer backend and a system PipeWire socket.
+if [ -d /opt/muos ] && [ -e /dev/fb0 ] && [ ! -e /dev/dri/card0 ]; then
+    export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-mali}"
+    export SDL_BLITTER_DISABLED="${SDL_BLITTER_DISABLED:-1}"
+    export SDL_ROTATION="${SDL_ROTATION:-0}"
+    export SDL_HQ_SCALER="${SDL_HQ_SCALER:-0}"
+fi
+if [ -S /run/pipewire-0 ]; then export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run}"; fi
 scriptdir=$(cd -- "$(dirname -- "$0")" && pwd)
 # Prefer sibling data; also support muOS ROMS/PORTS with data in /ports.
 GAMEDIR="$scriptdir/nightfall"

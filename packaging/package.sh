@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 root=$PWD
 version=$(cat VERSION)
 owner=${NIGHTFALL_REPOSITORY:-Miolonixc/nightfall-survivors}
+rm -rf "$root/dist/nightfall"
 mkdir -p dist/nightfall
 cp build/nightfall.aarch64 dist/nightfall/
 cp VERSION packaging/update.sh dist/nightfall/

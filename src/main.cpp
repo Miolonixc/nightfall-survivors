@@ -123,34 +123,40 @@ int selfTest() {
 }
 struct Sound {
     SDL_AudioDeviceID device = 0;
+    int notesSent = 0;
     Sound() {
         SDL_AudioSpec want{};
-        want.freq = 22050;
+        want.freq = 44100;
         want.format = AUDIO_S16SYS;
-        want.channels = 1;
-        want.samples = 512;
+        want.channels = 2;
+        want.samples = 1024;
         device = SDL_OpenAudioDevice(nullptr, 0, &want, nullptr, 0);
-        if (device)
-            SDL_PauseAudioDevice(device, 0);
     }
     ~Sound() {
         if (device)
             SDL_CloseAudioDevice(device);
     }
     void play(float hz, float duration = .08f) {
-        if (!device || SDL_GetQueuedAudioSize(device) > 12000)
+        if (!device || SDL_GetQueuedAudioSize(device) > 48000)
             return;
-        std::vector<int16_t> samples(size_t(22050 * duration));
-        for (size_t i = 0; i < samples.size(); i++) {
-            float env = 1.f - float(i) / samples.size();
-            samples[i] = int16_t(std::sin(i * hz * 2 * Pi / 22050) * 1800 * env * env);
+        const size_t frames = size_t(44100 * duration);
+        std::vector<int16_t> samples(frames * 2);
+        for (size_t i = 0; i < frames; ++i) {
+            float env = 1.f - float(i) / frames;
+            auto sample = int16_t(std::sin(i * hz * 2 * Pi / 44100) * 7000 * env * env);
+            samples[2 * i] = samples[2 * i + 1] = sample;
         }
-        SDL_QueueAudio(device, samples.data(), uint32_t(samples.size() * 2));
+        if (SDL_QueueAudio(device, samples.data(), uint32_t(samples.size() * 2)) == 0) {
+            ++notesSent;
+            SDL_PauseAudioDevice(device, 0);
+        } else
+            std::cerr << "Audio queue error: " << SDL_GetError() << std::endl;
     }
 };
 struct Controls {
     SDL_GameController *pad = nullptr;
     SDL_JoystickID instance = -1;
+    std::string exitReason;
     bool confirm = false, back = false, pause = false, up = false, down = false, left = false,
          right = false, quit = false;
     ~Controls() {
@@ -168,8 +174,10 @@ struct Controls {
         confirm = back = pause = up = down = left = right = false;
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT)
+            if (e.type == SDL_QUIT) {
                 quit = true;
+                exitReason = "SDL_QUIT";
+            }
             if (e.type == SDL_CONTROLLERDEVICEADDED)
                 open(e.cdevice.which);
             if (e.type == SDL_CONTROLLERDEVICEREMOVED && e.cdevice.which == instance) {
@@ -313,8 +321,8 @@ int main(int argc, char **argv) {
     using namespace nf;
     int frames = -1, port = Port;
     bool headless = false, demo = false, fast = false, fullscreen = false, host = false,
-         uiTest = false;
-    std::string join, capture, report, readyFile;
+         uiTest = false, audioTest = false, stress = false, benchmark = false;
+    std::string join, capture, report, readyFile, auditFile;
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         auto value = [&]() {
@@ -332,6 +340,15 @@ int main(int argc, char **argv) {
                 headless = true;
             else if (arg == "--demo")
                 demo = true;
+            else if (arg == "--stress") {
+                stress = true;
+                demo = true;
+                benchmark = true;
+            } else if (arg == "--benchmark") {
+                benchmark = true;
+                demo = true;
+            } else if (arg == "--audio-test")
+                audioTest = true;
             else if (arg == "--ui-test")
                 uiTest = true;
             else if (arg == "--fast")
@@ -348,6 +365,8 @@ int main(int argc, char **argv) {
                 port = std::stoi(value());
             else if (arg == "--capture")
                 capture = value();
+            else if (arg == "--audit")
+                auditFile = value();
             else if (arg == "--report")
                 report = value();
             else if (arg == "--ready-file")
@@ -355,7 +374,8 @@ int main(int argc, char **argv) {
             else if (arg == "--help") {
                 std::cout << "Nightfall Survivors " NIGHTFALL_VERSION
                              "\n--host | --join IPV4 [--port 40440] --fullscreen\n--self-test "
-                             "--demo --headless --frames N --fast --capture BMP --report JSON\n";
+                             "--demo --stress --benchmark --audio-test --headless --frames N "
+                             "--fast --capture BMP --report JSON\n";
                 return 0;
             } else
                 throw std::runtime_error("Unknown argument: " + arg);
@@ -376,6 +396,14 @@ int main(int argc, char **argv) {
         std::cerr << SDL_GetError() << "\n";
         return 1;
     }
+    const char *videoDriver = SDL_GetCurrentVideoDriver();
+    if (!headless && videoDriver &&
+        (std::string(videoDriver) == "offscreen" || std::string(videoDriver) == "dummy")) {
+        std::cerr << "No physical display backend: " << videoDriver
+                  << ". Use the firmware SDL2 library.\n";
+        SDL_Quit();
+        return 1;
+    }
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
     SDL_Window *window = SDL_CreateWindow("Nightfall Survivors", SDL_WINDOWPOS_CENTERED,
                                           SDL_WINDOWPOS_CENTERED, 640, 480,
@@ -386,8 +414,11 @@ int main(int argc, char **argv) {
         SDL_Quit();
         return 1;
     }
-    SDL_Renderer *r =
-        SDL_CreateRenderer(window, -1, headless ? SDL_RENDERER_SOFTWARE : SDL_RENDERER_ACCELERATED);
+    uint32_t renderFlags =
+        headless ? uint32_t(SDL_RENDERER_SOFTWARE) : uint32_t(SDL_RENDERER_ACCELERATED);
+    if (!headless && !fast)
+        renderFlags |= SDL_RENDERER_PRESENTVSYNC;
+    SDL_Renderer *r = SDL_CreateRenderer(window, -1, renderFlags);
     if (!r)
         r = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
     if (!r) {
@@ -399,6 +430,11 @@ int main(int argc, char **argv) {
     SDL_RenderSetLogicalSize(r, 640, 480);
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
     SDL_ShowCursor(SDL_DISABLE);
+    SDL_RendererInfo rendererInfo{};
+    SDL_GetRendererInfo(r, &rendererInfo);
+    std::cout << "VIDEO " << SDL_GetCurrentVideoDriver() << " RENDERER "
+              << (rendererInfo.name ? rendererInfo.name : "unknown") << " AUDIO "
+              << (SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "none") << std::endl;
     int result = 0;
     {
         Paint paint{r, {}};
@@ -406,6 +442,8 @@ int main(int argc, char **argv) {
         for (int i = 0; i < SDL_NumJoysticks(); i++)
             controls.open(i);
         Sound sound;
+        std::cout << "CONTROLLER " << (controls.pad ? SDL_GameControllerName(controls.pad) : "none")
+                  << " AUDIO_DEVICE " << (sound.device ? "open" : SDL_GetError()) << std::endl;
         bool muted = false;
         Network net;
         World world;
@@ -465,6 +503,20 @@ int main(int argc, char **argv) {
             world.players[0].upgrades = {2, 2, 2, 1, 1, 1};
             world.players[0].hp = 125;
         }
+        if (stress) {
+            world.time = 230;
+            world.spawnClock = 10000;
+            world.enemies.clear();
+            for (int i = 0; i < MaxEnemies; ++i) {
+                float angle = i * 2 * Pi / MaxEnemies;
+                float radius = 80.f + float(i % 11) * 13.f;
+                world.enemies.push_back(
+                    {world.players[0].pos + Vec{std::cos(angle), std::sin(angle)} * radius,
+                     1000000.f, 0, i % 3, uint32_t(i + 1)});
+            }
+            world.players[0].upgrades = {4, 4, 6, 4, 2, 4};
+            world.players[0].hp = maxHp(world.players[0]);
+        }
         float accumulator = 0;
         auto previous = std::chrono::steady_clock::now();
         auto launchTime = previous;
@@ -472,8 +524,17 @@ int main(int argc, char **argv) {
         unsigned visited = 0;
         float lastHp = 100;
         bool readyWritten = false;
+        std::vector<float> frameTimes;
+        int peakEnemies = 0, peakShots = 0;
+        uint64_t controllerEvents = 0;
+        uint32_t lastAudit = 0;
+        float travelDistance = 0;
+        Vec lastPlayerPos = world.players[0].pos;
         while (!controls.quit && (frames < 0 || frame < frames)) {
             auto now = std::chrono::steady_clock::now();
+            if (frame > 0 && frameTimes.size() < 36000)
+                frameTimes.push_back(
+                    std::chrono::duration<float, std::milli>(now - previous).count());
             float elapsed = std::chrono::duration<float>(now - previous).count();
             previous = now;
             accumulator += fast ? Step : std::min(elapsed, .20f);
@@ -521,6 +582,20 @@ int main(int argc, char **argv) {
                 }
             }
             controls.poll();
+            if (benchmark) {
+                controls.confirm = controls.back = controls.pause = controls.up = controls.down =
+                    controls.left = controls.right = false;
+            }
+            if (audioTest && frame % 60 == 0 && frame < 180)
+                sound.play(440.f + 220.f * (frame / 60), .25f);
+            if (!muted && !benchmark && (view == Title || view == Pause || view == Join)) {
+                if (controls.confirm)
+                    sound.play(620, .09f);
+                else if (controls.back)
+                    sound.play(280, .06f);
+                else if (controls.up || controls.down || controls.left || controls.right)
+                    sound.play(420, .045f);
+            }
             bool consumed = false;
             if (view == Title) {
                 if (controls.up)
@@ -541,12 +616,16 @@ int main(int argc, char **argv) {
                     }
                     if (selection == 4)
                         muted = !muted;
-                    if (selection == 5)
+                    if (selection == 5) {
                         controls.quit = true;
+                        controls.exitReason = "MENU_QUIT";
+                    }
                     consumed = true;
                 }
-                if (controls.back)
+                if (controls.back) {
                     controls.quit = true;
+                    controls.exitReason = "TITLE_BACK";
+                }
             } else if (view == Join) {
                 if (controls.left)
                     ipPart = (ipPart + 3) % 4;
@@ -669,28 +748,54 @@ int main(int argc, char **argv) {
             lastHp = p.hp;
             lastLevel = p.level;
             lastKills = p.kills;
+            peakEnemies = std::max(peakEnemies, int(world.enemies.size()));
+            peakShots = std::max(peakShots, int(world.shots.size()));
+            Input observed = controls.movement();
+            if (controls.confirm || controls.back || controls.pause || controls.up ||
+                controls.down || controls.left || controls.right || std::abs(observed.x) > .25f ||
+                std::abs(observed.y) > .25f)
+                ++controllerEvents;
+            float moved = length(world.players[id].pos - lastPlayerPos);
+            if (moved < 20)
+                travelDistance += moved;
+            lastPlayerPos = world.players[id].pos;
             visited |= 1u << unsigned(view);
             maxParty =
                 std::max(maxParty, int(std::count_if(world.players.begin(), world.players.end(),
                                                      [](const Player &p) { return p.active; })));
+            if (stress) {
+                world.players[0].hp = maxHp(world.players[0]);
+                world.players[0].invuln = 1;
+                world.phase = Phase::Playing;
+            }
             paint.world(world, id);
+            if (benchmark) {
+                paint.box(0, 54, 640, 18, Ink);
+                paint.center(
+                    58, stress ? "PERFORMANCE TEST - 240 ENEMIES" : "PERFORMANCE TEST - AUTOPILOT",
+                    Gold, 1);
+            }
             if (view == Title) {
                 paint.box(0, 0, 640, 480, {9, 15, 25, 215});
-                paint.center(81, "NIGHTFALL", Teal, 5);
-                paint.center(126, "S U R V I V O R S", Gold, 2);
+                paint.center(70, "NIGHTFALL", Gold, 5);
+                paint.center(126, "S U R V I V O R S", Teal, 2);
+                paint.line(190, 150, 300, 150, {80, 71, 51});
+                paint.line(340, 150, 450, 150, {80, 71, 51});
+                paint.diamond(320, 150, 3, Gold);
                 paint.center(159, "THE LAST LIGHT IN THE GRAVEYARD", Muted, 1);
                 const char *items[] = {"SOLO SURVIVAL", "HOST CO-OP", "JOIN CO-OP",
                                        "HOW TO PLAY",   "SOUND",      "QUIT"};
                 for (int i = 0; i < 6; i++) {
                     int y = 194 + i * 32;
                     if (selection == i) {
-                        paint.box(148, y - 7, 344, 28, {35, 63, 70});
+                        paint.box(148, y - 7, 344, 28, {35, 48, 51});
+                        paint.frame(148, y - 7, 344, 28, {121, 106, 69});
                         paint.text(159, y, ">", Teal, 2);
                     }
                     std::string label = items[i];
                     if (i == 4)
                         label += muted ? "  OFF" : "  ON";
-                    paint.text(190, y, label, selection == i ? Teal : White, 2);
+                    paint.center(y, label, selection == i ? Gold : White, 2);
                 }
                 paint.center(406, "A/ENTER SELECT   B/ESC BACK", Muted, 1);
                 paint.text(12, 469, "V" NIGHTFALL_VERSION, Muted, 1);
@@ -776,6 +881,24 @@ int main(int argc, char **argv) {
                 if (s)
                     SDL_FreeSurface(s);
             }
+            if (!auditFile.empty() && SDL_GetTicks() - lastAudit >= 100) {
+                lastAudit = SDL_GetTicks();
+                std::ofstream audit(auditFile + ".tmp");
+                audit << "{\"view\":" << int(view) << ",\"selection\":" << selection
+                      << ",\"x\":" << world.players[id].pos.x
+                      << ",\"y\":" << world.players[id].pos.y;
+                if (controls.pad) {
+                    audit << ",\"axes\":[";
+                    for (int a = 0; a < 4; ++a)
+                        audit << (a ? "," : "")
+                              << SDL_JoystickGetAxis(SDL_GameControllerGetJoystick(controls.pad),
+                                                     a);
+                    audit << "]";
+                }
+                audit << "}\n";
+                audit.close();
+                std::rename((auditFile + ".tmp").c_str(), auditFile.c_str());
+            }
             SDL_RenderPresent(r);
             if (!readyWritten && !readyFile.empty() && frame > 30 &&
                 std::chrono::duration<float>(now - launchTime).count() > 2) {
@@ -784,8 +907,10 @@ int main(int argc, char **argv) {
                 readyWritten = bool(stamp);
             }
             frame++;
-            if (!fast)
-                std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            if (!fast && !(rendererInfo.flags & SDL_RENDERER_PRESENTVSYNC)) {
+                auto target = now + std::chrono::microseconds(16667);
+                std::this_thread::sleep_until(target);
+            }
         }
         if (uiTest) {
             if (visited != 31 || view != Title || net.mode != Network::Offline) {
@@ -800,11 +925,35 @@ int main(int argc, char **argv) {
         for (int i : ip)
             settings << " " << i;
         settings << "\n";
+        double seconds =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - launchTime).count();
+        std::sort(frameTimes.begin(), frameTimes.end());
+        auto percentile = [&](float q) {
+            return frameTimes.empty()
+                       ? 0.f
+                       : frameTimes[std::min(frameTimes.size() - 1, size_t(q * frameTimes.size()))];
+        };
+        std::cout << "PERF frames=" << frame << " seconds=" << seconds
+                  << " fps=" << (seconds > 0 ? frame / seconds : 0)
+                  << " p95_ms=" << percentile(.95f) << " p99_ms=" << percentile(.99f)
+                  << " peak_enemies=" << peakEnemies << " peak_shots=" << peakShots
+                  << " exit=" << controls.exitReason << std::endl;
         if (!report.empty()) {
             std::ofstream out(report);
-            out << "{\"frames\":" << frame << ",\"ticks\":" << world.ticks
-                << ",\"time\":" << world.time << ",\"local\":" << net.local
-                << ",\"joins\":" << net.joins << ",\"states\":" << net.states << ",\"active\":[";
+            out << "{\"seconds\":" << seconds << ",\"fps\":" << (seconds > 0 ? frame / seconds : 0)
+                << ",\"p95_ms\":" << percentile(.95f) << ",\"p99_ms\":" << percentile(.99f)
+                << ",\"video\":\"" << SDL_GetCurrentVideoDriver() << "\",\"renderer\":\""
+                << (rendererInfo.name ? rendererInfo.name : "unknown")
+                << "\",\"audio_notes\":" << sound.notesSent
+                << ",\"audio_open\":" << (sound.device ? "true" : "false")
+                << ",\"controller_open\":" << (controls.pad ? "true" : "false")
+                << ",\"exit_reason\":\"" << controls.exitReason
+                << "\",\"views_visited\":" << visited << ",\"travel_distance\":" << travelDistance
+                << ",\"input_frames\":" << controllerEvents << ",\"peak_enemies\":" << peakEnemies
+                << ",\"peak_shots\":" << peakShots << ",\"frames\":" << frame
+                << ",\"ticks\":" << world.ticks << ",\"time\":" << world.time
+                << ",\"local\":" << net.local << ",\"joins\":" << net.joins
+                << ",\"states\":" << net.states << ",\"active\":[";
             for (int i = 0; i < 4; i++)
                 out << (i ? "," : "") << (world.players[i].active ? "true" : "false");
             out << "],\"level\":" << world.players[std::max(0, net.local)].level

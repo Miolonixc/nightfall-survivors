@@ -1,7 +1,7 @@
 #!/bin/bash
 # PortMaster environment and native SDL controller mapping.
 controlfolder=''
-for candidate in /opt/system/Tools/PortMaster /opt/tools/PortMaster "${XDG_DATA_HOME:-$HOME/.local/share}/PortMaster" /roms/ports/PortMaster; do
+for candidate in /opt/system/Tools/PortMaster /opt/tools/PortMaster "${XDG_DATA_HOME:-$HOME/.local/share}/PortMaster" /mnt/mmc/MUOS/PortMaster /mnt/sdcard/MUOS/PortMaster /roms/ports/PortMaster; do
     if [ -f "$candidate/control.txt" ]; then controlfolder=$candidate; break; fi
 done
 if [ -n "$controlfolder" ]; then
